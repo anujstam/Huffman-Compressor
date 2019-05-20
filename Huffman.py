@@ -126,6 +126,7 @@ def EncodeFile(filename):
     obj.data = int(obj.data[::-1], 2).to_bytes(obj.length//8, 'little')
     with open(newfile,"wb") as f:
         pickle.dump(obj,f)
+    print("Object size:",sys.getsizeof(obj))
     print("File size:",os.stat(newfile).st_size)
     print("Compression complete! Time taken: %.2f seconds"%(time.time()-start))
     print("Compressed filename:",newfile)
