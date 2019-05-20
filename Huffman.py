@@ -1,8 +1,14 @@
-# -*- coding: cp1252 -*-
-
 import collections
 import pickle
+import time
 from functools import partial
+from  tkinter import *
+from tkinter.filedialog import askopenfilename
+import sys
+import os
+root = Tk()
+root.lift()
+root.withdraw()
 
 def computecode(node):
     if node.left!=None:
@@ -27,11 +33,9 @@ def inorder_print(node):
         inorder_print(node.right)
         
 def HuffEncode(data):
-    #print(data)
     encoded = {}
     encoder = {}
     for char in data:
-        #char = chr(char)
         if char not in encoded.keys():
             encoded[char]=1
         else:
@@ -56,7 +60,6 @@ def HuffEncode(data):
     inorder(root,encoder)
     encoded_data = ''
     for char in data:
-        #char = chr(char)
         encoded_data+=encoder[char]
     return encoded_data,root
 
@@ -70,7 +73,6 @@ def HuffDecode(text,tree):
             node = node.right
         if node.char!='':
             decoded+=node.char
-            #print(node.char,end='')
             node = tree
     return decoded
         
@@ -104,48 +106,61 @@ class EncodedObject:
         self.fname = ''
         self.data = ''
         self.tree = None
+        self.padding = 0
+        self.length = 0
 
 def EncodeFile(filename):
     obj = EncodedObject
-    '''
-    with open(filename,'r',encoding='ansi') as f:
-        text = f.read()
-    '''
     text = []
+    start = time.time()
+    print("Compressing file :",filename)
     with open(filename, 'rb') as file:
         for byte in iter(partial(file.read, 1), b''):
             text.append(byte)
     obj.fname = filename
     newfile = filename.split(".")[0] +".hfm"
-    print("Compressing file :",filename)
-    print("Compressed filename:",newfile)
     obj.data,obj.tree = HuffEncode(text)
+    obj.padding = 8-len(obj.data)%8
+    obj.data += "0"*obj.padding
+    obj.length = len(obj.data)
+    obj.data = int(obj.data[::-1], 2).to_bytes(obj.length//8, 'little')
     with open(newfile,"wb") as f:
         pickle.dump(obj,f)
-#use ansi
+    print("File size:",os.stat(newfile).st_size)
+    print("Compression complete! Time taken: %.2f seconds"%(time.time()-start))
+    print("Compressed filename:",newfile)
+
 def DecodeFile(filename):
+    start = time.time()
     with open(filename,'rb') as f:
         obj = pickle.load(f)
     oldf = obj.fname
     oldf = oldf.split(".")
     newf = oldf[0]+"_decompressed."+oldf[1]
-    raw = HuffDecode(obj.data,obj.tree)
-    '''
-    with open(newf,"w",encoding='ansi') as f:
-        f.write(raw)
-    '''
+    fmstring = '0'+str(obj.length)+'b'
+    padded_str = format(int.from_bytes(obj.data, 'little'), fmstring)[::-1]
+    raw = padded_str[:obj.length-obj.padding]
+    decoded = HuffDecode(raw,obj.tree)
     with open(newf,"wb") as f:
-        f.write(raw)
+        f.write(decoded)
+    print("Deompression complete! Time taken: %.2f seconds"%(time.time()-start))
+    print("Decompressed filename:",newf)
 
 
-#testfile = 'test.txt'
-testfile = "ESA- Project Submission Presentation 2019.pptx"
-#testfile = 'MP_Report.docx'
-#testfile = 'lul.jpg'
-EncodeFile(testfile)
-print("Compressed")
-#DecodeFile("lul.hfm")
-#DecodeFile("test.hfm")
-DecodeFile("ESA- Project Submission Presentation 2019.hfm")
-#DecodeFile('MP_Report.hfm')
-print("Decompressed")
+print('Enter:\n1 to compress a file\n2 to decompress a hfm file\nAnything else to exit')
+while True:
+    choice = int(input(">>"))
+    if choice == 1:
+        print("Select the file to compress")
+        root.filename = askopenfilename(title = "choose a file")
+        file = root.filename
+        root.withdraw()
+        EncodeFile(file)
+    elif choice == 2:
+        print("Select the file to decompress")
+        root.filename =  askopenfilename(title = "choose a file",filetypes = [("Huffman Compressed","*.hfm")])
+        file = root.filename
+        root.withdraw()
+        DecodeFile(file)
+    else:
+        break
