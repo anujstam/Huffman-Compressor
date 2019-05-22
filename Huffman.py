@@ -10,6 +10,26 @@ root = Tk()
 root.lift()
 root.withdraw()
 
+def get_size(obj, seen=None):
+    """Recursively finds size of objects"""
+    size = sys.getsizeof(obj)
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0
+    # Important mark as seen *before* entering recursion to gracefully handle
+    # self-referential objects
+    seen.add(obj_id)
+    if isinstance(obj, dict):
+        size += sum([get_size(v, seen) for v in obj.values()])
+        size += sum([get_size(k, seen) for k in obj.keys()])
+    elif hasattr(obj, '__dict__'):
+        size += get_size(obj.__dict__, seen)
+    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+        size += sum([get_size(i, seen) for i in obj])
+    return size
+
 def computecode(node):
     if node.left!=None:
         node.left.code = node.left.parent.code + '0'
@@ -31,6 +51,18 @@ def inorder_print(node):
         if node.char!='':
             print(node.char,":",node.code)
         inorder_print(node.right)
+
+def addnode(node,node_q):
+    if(len(node_q)<1):
+        node_q.append(node)
+        #print("Last node in")
+    else:
+        i = 0
+        while(i<len(node_q) and node_q[i].freq<node.freq):
+            i+=1
+        node_q.insert(i,node)
+        #print("Inserted at:",i)
+    return node_q
         
 def HuffEncode(data):
     encoded = {}
@@ -41,28 +73,33 @@ def HuffEncode(data):
         else:
             encoded[char]+=1
     encoded = collections.OrderedDict(sorted(encoded.items(), key=lambda kv: kv[1]))
-    
     nodes = []
     for k in encoded.keys():
         node = HuffNode()
         node.char = k
         node.freq = encoded[k]
         nodes.append(node)
+    #nodes = nodes[::-1]
     while len(nodes)>1:
         node_a = nodes[0]
         node_b = nodes[1]
         nodes = nodes[2:]
         new_node = JoinNodes(node_a,node_b)
-        nodes = [new_node]+nodes
+        nodes = addnode(new_node,nodes)
+        #nodes = nodes + [new_node]
+            
     root = nodes[0]
     root.code = ''
     computecode(root)
     inorder(root,encoder)
+    #inorder_print(root)
     encoded_data = ''
     for char in data:
         encoded_data+=encoder[char]
-    return encoded_data,root
-
+    
+    #print(encoder)
+    return encoder
+'''
 def HuffDecode(text,tree):
     decoded = b''
     node = tree
@@ -75,7 +112,27 @@ def HuffDecode(text,tree):
             decoded+=node.char
             node = tree
     return decoded
-        
+'''
+
+def HuffDecode(text,encoder,length,padding):
+    decoded = bytearray()
+    bintext = ''
+    p = dict(zip(encoder.values(),encoder.keys()))
+    keys = p.keys()
+    #print(p)
+    '''
+    for i in text:
+        bintext += str(i)
+        #bintext+= bin(int.from_bytes(i, 'little'))[2:]
+    bintext = bintext[:length-padding]
+    '''
+    k = ''
+    for i in range(len(text)):
+        k+=text[i]
+        if k in keys:
+            decoded+=bytearray(p[k])
+            k = ''
+    return decoded
 
 def JoinNodes(node_a,node_b):
     if node_a.freq>node_b.freq:
@@ -105,28 +162,40 @@ class EncodedObject:
     def __init__(self):
         self.fname = ''
         self.data = ''
-        self.tree = None
+        #self.tree = None
         self.padding = 0
-        self.length = 0
+        #self.length = 0
+        self.encoder = []
 
 def EncodeFile(filename):
-    obj = EncodedObject
+    obj = EncodedObject()
     text = []
     start = time.time()
     print("Compressing file :",filename)
     with open(filename, 'rb') as file:
         for byte in iter(partial(file.read, 1), b''):
             text.append(byte)
+    print("No of bytes processed in file:",len(text))
     obj.fname = filename
     newfile = filename.split(".")[0] +".hfm"
-    obj.data,obj.tree = HuffEncode(text)
-    obj.padding = 8-len(obj.data)%8
+    obj.encoder = HuffEncode(text)
+    for byte in text:
+        obj.data += obj.encoder[byte]
+    obj.padding = 8-(len(obj.data)%8)
     obj.data += "0"*obj.padding
-    obj.length = len(obj.data)
-    obj.data = int(obj.data[::-1], 2).to_bytes(obj.length//8, 'little')
+    #print(obj.data)
+    #obj.length = len(obj.data)
+    b = bytearray()
+    for i in range(0,len(obj.data),8):
+        b.append(int(obj.data[i:i+8],2))
+    obj.data = b
+    #obj.data = int(obj.data[::-1], 2).to_bytes(obj.length//8, 'little')
+    #print(obj.data)
     with open(newfile,"wb") as f:
         pickle.dump(obj,f)
-    print("Object size:",sys.getsizeof(obj))
+     #print(text)
+    print("No of bytes in compressed data:",len(obj.data))
+    print("Object size:",get_size(obj))
     print("File size:",os.stat(newfile).st_size)
     print("Compression complete! Time taken: %.2f seconds"%(time.time()-start))
     print("Compressed filename:",newfile)
@@ -138,10 +207,22 @@ def DecodeFile(filename):
     oldf = obj.fname
     oldf = oldf.split(".")
     newf = oldf[0]+"_decompressed."+oldf[1]
-    fmstring = '0'+str(obj.length)+'b'
-    padded_str = format(int.from_bytes(obj.data, 'little'), fmstring)[::-1]
-    raw = padded_str[:obj.length-obj.padding]
-    decoded = HuffDecode(raw,obj.tree)
+    bintext = ''
+    length = len(obj.data)
+    padding = obj.padding
+    #print(obj.data)
+    for i in obj.data:
+        #print(i)
+        #bintext += bin(int.from_bytes(i, 'little'))[2:]
+        temp = str(bin(i)[2:])
+        bytestring = '0'*(8-len(temp))+temp
+        #print(i,temp,bytestring)
+        #temp = '0'*(8-(len(temp)%8)) + temp
+        bintext += bytestring
+        
+    bintext = bintext[0:len(bintext)-padding]
+    #print(bintext)
+    decoded = HuffDecode(bintext,obj.encoder,length,obj.padding)
     with open(newf,"wb") as f:
         f.write(decoded)
     print("Deompression complete! Time taken: %.2f seconds"%(time.time()-start))
